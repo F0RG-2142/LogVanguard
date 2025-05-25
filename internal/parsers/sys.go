@@ -1,12 +1,14 @@
-package server
+package parsers
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strconv"
 	"time"
 
-	"github.com/F0RG-2142/LogVanguard/pkg/models"
+	"github.com/F0RG-2142/LogVanguard/models"
 )
 
 //get and process tcp syslogs
@@ -24,7 +26,7 @@ import (
 //	}
 //}
 
-var severityMap = map[int]string{
+var tcpSeverityMap = map[int]string{
 	0: "error", // Emergency
 	1: "error", // Alert
 	2: "error", // Critical
@@ -33,6 +35,30 @@ var severityMap = map[int]string{
 	5: "info",  // Notice
 	6: "info",  // Informational
 	7: "debug", // Debug
+}
+
+func SysLogHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	//Decode req
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+	//parse log
+	log, err := parseSyslog(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+	}
+	//fix or update
+	jsonLog, err := json.Marshal(log)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write(jsonLog) // logic to send logs to ml
+
 }
 
 // parseSyslog parses a syslog message into a LogEntry
@@ -53,7 +79,7 @@ func parseSyslog(message string) (models.LogEntry, error) {
 		return models.LogEntry{}, fmt.Errorf("invalid PRI value: %v", err)
 	}
 	severityValue := pri % 8
-	severity, ok := severityMap[severityValue]
+	severity, ok := tcpSeverityMap[severityValue]
 	if !ok {
 		severity = "unknown"
 	}
@@ -82,6 +108,5 @@ func parseSyslog(message string) (models.LogEntry, error) {
 		Severity:  severity,
 		Source:    appName,
 		Message:   msg,
-		Tags:      tags,
 	}, nil
 }
